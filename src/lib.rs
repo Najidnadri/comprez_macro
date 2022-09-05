@@ -24,7 +24,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                     let attrs_str = data_attr.iter().map(|attr| attr.to_token_stream().to_string()).filter(|attr| attr.contains("maxNum")).collect::<Vec<String>>();
                     if attrs_str.len() != 1 {
                         match data_type_str.as_str() {
-                            "u8" | "u16" | "u32" | "u64" | "u128" => panic!("Each field in the struct must have only ONE 'maxNum' attribute"),
+                            "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => panic!("Each field in the struct must have only ONE 'maxNum' attribute"),
                             _ => (),
                         }
                         
@@ -38,14 +38,34 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                         }).unwrap();
                     }
 
-                    let compress_token = quote! {
-                        let #data_name = self.#data_name.compress(Some(#max_num))?;
-                        all_compressed.push(#data_name);
+                    let compress_token = match max_num {
+                        0 => {
+                            quote! {
+                                let #data_name = self.#data_name.compress(None)?;
+                                all_compressed.push(#data_name);
+                            }
+                        },
+                        _ => {
+                            quote! {
+                                let #data_name = self.#data_name.compress(Some(#max_num as #data_type))?;
+                                all_compressed.push(#data_name);
+                            }
+                        }
                     };
-
-                    let max_binaries_token = quote! {
-                        let #data_name = #data_type::max_binaries(Some(#max_num));
-                        size.push(#data_name);
+                
+                    let max_binaries_token = match max_num {
+                        0 => {
+                            quote! {
+                                let #data_name = #data_type::max_binaries(None);
+                                size.push(#data_name);
+                            }
+                        },
+                        _ => {
+                            quote! {
+                                let #data_name = #data_type::max_binaries(Some(#max_num as #data_type));
+                                size.push(#data_name);
+                            }
+                        }
                     };
 
                     let decompress_token = quote! {
@@ -70,7 +90,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
         
         impl Comprezable for #ident {
 
-            fn compress(self, _max_num: Option<u128>) -> Result<Compressed, CompressError> {
+            fn compress(self, _max_num: Option<Self>) -> Result<Compressed, CompressError> {
                 let mut all_compressed: Vec<Compressed> = vec![];
                 #(#compress_tokens)*
         
@@ -82,7 +102,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                 Ok(Compressed::Bytes(binaries.to_bytes()))
             }
         
-            fn max_binaries(_max_num: Option<u128>) -> BinaryChunk {
+            fn max_binaries(_max_num: Option<Self>) -> BinaryChunk {
                 let mut size = vec![];
                 #(#max_binaries_tokens)*
                 
