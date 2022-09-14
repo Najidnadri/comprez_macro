@@ -15,11 +15,12 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
         syn::Data::Struct(s) => match s.fields {
             syn::Fields::Named(FieldsNamed { named, .. }) => {
                 for field in named {
-                    let data_type = field.ty.clone().into_token_stream();
                     let data_name = field.ident.to_token_stream();
+                    let mut data_type = field.ty.clone().into_token_stream();
                     let data_attr = field.attrs;
                     let data_type_str = field.ty.clone().into_token_stream().to_string();
 
+                    //max num check
                     let mut max_num = 0;
                     let attrs_str = data_attr.iter().map(|attr| attr.to_token_stream().to_string()).filter(|attr| attr.contains("maxNum")).collect::<Vec<String>>();
                     if attrs_str.len() != 1 {
@@ -30,6 +31,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                         
                     }
 
+
                     for attr in attrs_str {
                         let equal_index = attr.find('=').ok_or_else(|| panic!("Error finding '=' in the attribute: {}", attr)).unwrap();
                         let (_, num) = attr.split_at(equal_index + 1);
@@ -38,16 +40,28 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                         }).unwrap();
                     }
 
+                    match data_type_str.as_str() {
+                        "Vec < u8 >" => {
+                            data_type = quote! {
+                                Vec::<u8>
+                            }
+                        },
+                        _ => {
+                            ()
+                        }
+                    }
+
                     let compress_token = match max_num {
                         0 => {
                             quote! {
-                                let #data_name = self.#data_name.compress(None)?;
+                                let #data_name = self.#data_name.compress_to_binaries(None)?;
                                 all_compressed.push(#data_name);
+                                
                             }
                         },
                         _ => {
                             quote! {
-                                let #data_name = self.#data_name.compress(Some(#max_num as #data_type))?;
+                                let #data_name = self.#data_name.compress_to_binaries(Some(#max_num as #data_type))?;
                                 all_compressed.push(#data_name);
                             }
                         }
@@ -69,7 +83,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                     };
 
                     let decompress_token = quote! {
-                        #data_name: #data_type::decompress(Compressed::from_binaries(chunked_binaries.next().unwrap()))?
+                        #data_name: #data_type::decompress(Compressed::from_binaries(&chunked_binaries.next().unwrap()))?
                     };
 
 
@@ -90,7 +104,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
         
         impl Comprezable for #ident {
 
-            fn compress(self, _max_num: Option<Self>) -> Result<Compressed, CompressError> {
+            fn compress_to_binaries(self, _max_num: Option<Self>) -> Result<Compressed, CompressError> {
                 let mut all_compressed: Vec<Compressed> = vec![];
                 #(#compress_tokens)*
         
@@ -99,7 +113,12 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                     binaries = binaries.combine(compressed);
                 }
                 
-                Ok(Compressed::Bytes(binaries.to_bytes()))
+                Ok(binaries)
+            }
+
+            fn compress(self) -> Result<Compressed, CompressError> {
+                let compressed_binaries = self.compress_to_binaries(None)?;
+                Ok(Compressed::Bytes(compressed_binaries.to_bytes()))
             }
         
             fn max_binaries(_max_num: Option<Self>) -> BinaryChunk {
@@ -111,26 +130,14 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
         
             fn decompress(compressed: Compressed) -> Result<#ident, DecompressError> {
                 let binary_chunks = #ident::max_binaries(None);
-                let binaries = compressed.to_binaries();
-                let mut chunk_sizes = Vec::new();
-                match binary_chunks {
-                    BinaryChunk::Nested(chunks) => {
-                        for chunk in chunks {
-                            let chunk_size = chunk.flatten().iter().sum::<usize>();
-                            chunk_sizes.push(chunk_size);
-                        }
-                    },
-                    BinaryChunk::Single(_) => {
-                        panic!()
-                    }
+                let mut binaries = compressed.to_binaries();
+
+                let mut chunked_binaries = vec![];
+                if let BinaryChunk::Nested(chunks) = binary_chunks {
+                    chunked_binaries = BinaryChunk::chunk_up_v2(&mut binaries, chunks)?;
                 }
-                
-                let sum_of_chunks = chunk_sizes.iter().sum::<usize>();
-                let mut chunked_binaries = chunk_up(binaries.as_slice(), chunk_sizes.as_slice())
-                .map_err(|_| {
-                    DecompressError::create(DecompressError::WrongBytesLength(format!("given: {}-length binaries, should be: {}-length binaries; ", sum_of_chunks, binaries.len())))
-                })?.into_iter();
-                
+                let mut chunked_binaries = chunked_binaries.into_iter();
+
                 Ok(
                     #ident {
                         #(#decompress_tokens), *
