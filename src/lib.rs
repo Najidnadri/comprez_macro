@@ -31,6 +31,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                         
                     }
 
+                    
 
                     for attr in attrs_str {
                         let equal_index = attr.find('=').ok_or_else(|| panic!("Error finding '=' in the attribute: {}", attr)).unwrap();
@@ -40,15 +41,22 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                         }).unwrap();
                     }
 
-                    match data_type_str.as_str() {
-                        "Vec < u8 >" => {
-                            data_type = quote! {
-                                Vec::<u8>
+                    
+
+                    if data_type_str.contains("Vec") {
+                        let mut temp = quote! {
+                            Vec::
+                        };
+
+                        for (i, token) in data_type.clone().into_iter().enumerate() {
+                            if i == 0 {
+                                continue
+                            } else {
+                                temp.extend(vec![token]);
                             }
-                        },
-                        _ => {
-                            ()
                         }
+
+                        data_type = temp;
                     }
 
                     let compress_token = match max_num {
@@ -61,7 +69,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                         },
                         _ => {
                             quote! {
-                                let #data_name = self.#data_name.compress_to_binaries(Some(#max_num as #data_type))?;
+                                let #data_name = self.#data_name.compress_to_binaries(Some(#max_num))?;
                                 all_compressed.push(#data_name);
                             }
                         }
@@ -76,14 +84,14 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                         },
                         _ => {
                             quote! {
-                                let #data_name = #data_type::max_binaries(Some(#max_num as #data_type));
+                                let #data_name = #data_type::max_binaries(Some(#max_num));
                                 size.push(#data_name);
                             }
                         }
                     };
 
                     let decompress_token = quote! {
-                        #data_name: #data_type::decompress(Compressed::from_binaries(&chunked_binaries.next().unwrap()))?
+                        #data_name: a.next().unwrap().decompress(compressed)?
                     };
 
 
@@ -104,7 +112,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
         
         impl Comprezable for #ident {
 
-            fn compress_to_binaries(self, _max_num: Option<Self>) -> Result<Compressed, CompressError> {
+            fn compress_to_binaries(self, _max_num: Option<u128>) -> Result<Compressed, CompressError> {
                 let mut all_compressed: Vec<Compressed> = vec![];
                 #(#compress_tokens)*
         
@@ -121,7 +129,7 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
                 Ok(Compressed::Bytes(compressed_binaries.to_bytes()))
             }
         
-            fn max_binaries(_max_num: Option<Self>) -> BinaryChunk {
+            fn max_binaries(_max_num: Option<u128>) -> BinaryChunk {
                 let mut size = vec![];
                 #(#max_binaries_tokens)*
                 
@@ -129,23 +137,27 @@ pub fn derive_describe_fn(_item: TokenStream) -> TokenStream {
             }
         
             fn decompress(compressed: Compressed) -> Result<#ident, DecompressError> {
-                let binary_chunks = #ident::max_binaries(None);
-                let mut binaries = compressed.to_binaries();
+                let mut compressed = compressed.to_binaries();
+                Self::decompress_from_binaries(&mut compressed, None)
+            }
 
-                let mut chunked_binaries = vec![];
+            fn decompress_from_binaries(compressed: &mut Vec<u8>, _bit_size: Option<usize>) -> Result<Self, DecompressError> where Self: Sized {
+                //turn compressed to binaries
+                let binary_chunks = Self::max_binaries(None);
+        
+                let mut a = vec![];
                 if let BinaryChunk::Nested(chunks) = binary_chunks {
-                    chunked_binaries = BinaryChunk::chunk_up_v2(&mut binaries, chunks)?;
+                    a = chunks;
                 }
-                let mut chunked_binaries = chunked_binaries.into_iter();
-
+                let mut a = a.into_iter();
+                
+        
                 Ok(
                     #ident {
                         #(#decompress_tokens), *
                     }
                 )
             }
-
-            
         }
     };
 
