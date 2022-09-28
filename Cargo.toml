@@ -2,11 +2,11 @@
 name = "comprez_macro"
 authors = ["muhd.najid.nadri@gmail.com"]
 repository = "https://github.com/Najidnadri/comprez_macro"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 keywords = ["compress", "algorithm", "struct"]
-description = "Partner in crime with comprez, a library to compress structs"
+description = "Partner in crime with comprez, a library to compress structs and enums"
 readme = "README.md"
 categories = ["compression"]
 
